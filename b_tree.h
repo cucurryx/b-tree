@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <vector>
 #include <optional>
+#include <iostream>
 
 // be accustomed to rust
 using u32 = u_int32_t;
@@ -87,15 +88,21 @@ void BTree<K, V>::insert(BTreeNode *node, const BTree::Pair &p) {
         root_ = newNode;
         newNode->splitChild(0); // split old root
         insertNotFull(newNode, p);
+    } else {
+        insertNotFull(node, p);
     }
-    insertNotFull(node, p);
 }
 
 template <typename K, typename V>
 void BTree<K, V>::insertNotFull(BTreeNode *node, const BTree::Pair &p) {
+    if (node == nullptr) {
+        //FIXME, log warn?
+        return;
+    }
+
     const auto &key = p.first;
-    auto iter = std::find_if(node->data_.begin(), node->data_.end(), [&key](const Pair &p){
-        return p.first >= key;
+    auto iter = std::find_if(node->data_.begin(), node->data_.end(), [&key](const Pair &curr){
+        return curr.first >= key;
     });
 
     if (node->isLeaf_) { // just insert
@@ -108,11 +115,9 @@ void BTree<K, V>::insertNotFull(BTreeNode *node, const BTree::Pair &p) {
             //FIXME: do something if splitChild fail.
             // I don't like try/catch
             node->splitChild(i);
-            if (node->data_[i].first < key) {
-                ++i;
-            }
+            if (node->data_[i].first < key) { ++i; }
         }
-        insertNotFull(node->children_[i+1], p);
+        insertNotFull(node->children_[i], p);
     }
 }
 
@@ -131,7 +136,7 @@ public:
         isLeaf_ = leaf;
         data_ = std::move(data);
         children_ = std::move(children);
-        n_ = static_cast<u32>(data_.size() + 1);
+        n_ = static_cast<u32>(data_.size());
     }
 
     ~BTreeNode() {
@@ -160,14 +165,9 @@ std::optional<BTreeNode<K, V>*> BTreeNode<K, V>::getChild(const Key &k) {
     if (isLeaf_ or data_.size() == 0) { // leaf doesn't have children
         return std::nullopt;
     }
-    assert(data_.size() + 1 == children_.size());
-    assert(n_ == data_.size() + 1);
-
     auto iter = std::find_if(data_.begin(), data_.end(), [&k](const Pair &p){
         return k <= p.first;
     });
-    // should call getValue first
-    assert(iter->first != k);
     return children_[iter - data_.begin()];
 }
 
@@ -181,26 +181,36 @@ std::optional<V> BTreeNode<K, V>::getValue(const Key &k) {
     return iter == data_.end() ? std::nullopt : std::optional<V>(iter->second);
 }
 
+// Split the i-th child of this node to prevent backtracking when insert node in child.
+// This function will split the i-th node into two node and both of them have `t` children and `t-1` keys.
+// And then, key in the mid of the n-th child will be brought to this node.
+// A lot of operation on vector...
 template <typename K, typename V>
 void BTreeNode<K, V>::splitChild(u32 i) {
     BTreeNode *oldLeft = children_[i], *newRight = new BTreeNode();
     newRight->isLeaf_ = oldLeft->isLeaf_;
 
     auto iterEnd = oldLeft->data_.end();
-    newRight->data_.insert(newRight->data_.begin(),iterEnd - kMinmumDegree + 1,iterEnd);
+    newRight->data_.insert(newRight->data_.begin(), iterEnd - kMinmumDegree + 1, iterEnd);
+    newRight->n_ += kMinmumDegree - 1;
 
     iterEnd = oldLeft->data_.end();
-    oldLeft->data_.erase(iterEnd - kMinmumDegree + 1, iterEnd);
+    oldLeft->data_.erase(iterEnd - kMinmumDegree + 1, iterEnd); //TODO update n
+    oldLeft->n_ -= kMinmumDegree;
+
     data_.insert(data_.begin() + i, *(oldLeft->data_.end() - 1));
     children_.insert(children_.begin() + i + 1, newRight);
     ++n_;
 
     oldLeft->data_.pop_back();
     if (not oldLeft->isLeaf_) {
-        newRight->children_.insert(newRight->children_.begin(),
+        newRight->children_.insert(
+                newRight->children_.begin(),
                 oldLeft->children_.end() - kMinmumDegree,
                 oldLeft->children_.end());
-        oldLeft->children_.erase(oldLeft->children_.end() - kMinmumDegree,
+
+        oldLeft->children_.erase(
+                oldLeft->children_.end() - kMinmumDegree,
                 oldLeft->children_.end());
     }
 }
