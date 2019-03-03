@@ -18,7 +18,7 @@ class BTreeNode;
 
 // the `t` value which decides how many children a node can have
 // the number of children node should be in [t, 2t]
-constexpr int kMinmumDegree = 2;
+constexpr int kMinmumDegree = 4;
 
 template <typename K, typename V>
 class BTree {
@@ -26,13 +26,24 @@ public:
     using Key = K;
     using Value = V;
     using BTreeNode = BTreeNode<K, V>;
+    using Pair = std::pair<K, V>;
 
 public:
+    BTree() {
+        root_ = new BTreeNode(true, std::vector<Pair>(), std::vector<BTreeNode*>());
+    }
+
+    ~BTree() {
+        delete root_;
+    }
+
     void insert(const Key &k, const Value &v);
     std::optional<Value> search(const Key &k);
 
 private:
     std::optional<Value> search(BTreeNode *node, const Key &k);
+    void insert(BTreeNode *node, const BTree::Pair &p);
+    void insertNotFull(BTreeNode *node, const BTree::Pair &p);
 
 private:
     BTreeNode *root_;
@@ -51,7 +62,7 @@ std::optional<V> BTree<K, V>::search(BTreeNode *node, const Key &k) {
     auto value = node->getValue(k);
     if (value == std::nullopt) {
         if (auto child = node->getChild(k); child != std::nullopt) {
-            return search(child, k);
+            return search(child.value_or(nullptr), k);
         }
     }
     return value;
@@ -59,7 +70,50 @@ std::optional<V> BTree<K, V>::search(BTreeNode *node, const Key &k) {
 
 template <typename K, typename V>
 void BTree<K, V>::insert(const Key &k, const Value &v) {
-    // TODO
+    insert(root_, Pair(k ,v));
+}
+
+template <typename K, typename V>
+void BTree<K, V>::insert(BTreeNode *node, const BTree::Pair &p) {
+    if (node == nullptr) {
+        //FIXME: panic?
+        return;
+    }
+    if (node->n_ == 2 * kMinmumDegree - 1) {
+        auto *newNode = new BTreeNode(
+                false,
+                std::vector<Pair>(),
+                std::vector<BTreeNode*>{ root_ });
+        root_ = newNode;
+        newNode->splitChild(0); // split old root
+        insertNotFull(newNode, p);
+    }
+    insertNotFull(node, p);
+}
+
+template <typename K, typename V>
+void BTree<K, V>::insertNotFull(BTreeNode *node, const BTree::Pair &p) {
+    const auto &key = p.first;
+    auto iter = std::find_if(node->data_.begin(), node->data_.end(), [&key](const Pair &p){
+        return p.first >= key;
+    });
+
+    if (node->isLeaf_) { // just insert
+        node->data_.insert(iter, p);
+        ++node->n_;
+    } else {
+        u32 i = iter - node->data_.begin();
+        auto *child = node->children_[i];
+        if (child->n_ == 2 * kMinmumDegree - 1) {
+            //FIXME: do something if splitChild fail.
+            // I don't like try/catch
+            node->splitChild(i);
+            if (node->data_[i].first < key) {
+                ++i;
+            }
+        }
+        insertNotFull(node->children_[i+1], p);
+    }
 }
 
 template <typename K, typename V>
@@ -71,16 +125,24 @@ public:
     using Pair = std::pair<K, V>;
 
 public:
-    BTreeNode() {
+    BTreeNode() = default;
 
+    BTreeNode(bool leaf, std::vector<Pair> &&data, std::vector<BTreeNode*> &&children) {
+        isLeaf_ = leaf;
+        data_ = std::move(data);
+        children_ = std::move(children);
+        n_ = static_cast<u32>(data_.size() + 1);
     }
 
     ~BTreeNode() {
-
+        for (auto child : children_) {
+            delete child;
+        }
     }
 
     std::optional<Self*> getChild(const Key &k);
     std::optional<Value> getValue(const Key &k);
+    void splitChild(u32 i);
 
 public:
     bool isLeaf_;
@@ -113,10 +175,34 @@ std::optional<BTreeNode<K, V>*> BTreeNode<K, V>::getChild(const Key &k) {
 // The return value is `std::optional`. So, if not found, return `std::nullopt`.
 template <typename K, typename V>
 std::optional<V> BTreeNode<K, V>::getValue(const Key &k) {
-    auto iter = std::find(data_.begin(), data_.end(), [&k](const Pair &p){
+    auto iter = std::find_if(data_.begin(), data_.end(), [&k](const Pair &p){
         return p.first == k;
     });
-    return iter == data_.end() ? std::nullopt : iter->second;
+    return iter == data_.end() ? std::nullopt : std::optional<V>(iter->second);
+}
+
+template <typename K, typename V>
+void BTreeNode<K, V>::splitChild(u32 i) {
+    BTreeNode *oldLeft = children_[i], *newRight = new BTreeNode();
+    newRight->isLeaf_ = oldLeft->isLeaf_;
+
+    auto iterEnd = oldLeft->data_.end();
+    newRight->data_.insert(newRight->data_.begin(),iterEnd - kMinmumDegree + 1,iterEnd);
+
+    iterEnd = oldLeft->data_.end();
+    oldLeft->data_.erase(iterEnd - kMinmumDegree + 1, iterEnd);
+    data_.insert(data_.begin() + i, *(oldLeft->data_.end() - 1));
+    children_.insert(children_.begin() + i + 1, newRight);
+    ++n_;
+
+    oldLeft->data_.pop_back();
+    if (not oldLeft->isLeaf_) {
+        newRight->children_.insert(newRight->children_.begin(),
+                oldLeft->children_.end() - kMinmumDegree,
+                oldLeft->children_.end());
+        oldLeft->children_.erase(oldLeft->children_.end() - kMinmumDegree,
+                oldLeft->children_.end());
+    }
 }
 
 #endif //BTREE_B_TREE_H
