@@ -19,7 +19,7 @@ class BTreeNode;
 
 // the `t` value which decides how many children a node can have
 // the number of children node should be in [t, 2t]
-constexpr int kMinmumDegree = 4;
+constexpr int kMinDegree = 4;
 
 template <typename K, typename V>
 class BTree {
@@ -39,12 +39,14 @@ public:
     }
 
     void insert(const Key &k, const Value &v);
+    void erase(const Key &k);
     std::optional<Value> search(const Key &k);
 
 private:
     std::optional<Value> search(BTreeNode *node, const Key &k);
     void insert(BTreeNode *node, const BTree::Pair &p);
     void insertNotFull(BTreeNode *node, const BTree::Pair &p);
+    void erase(BTreeNode *node, const Key &k);
 
 private:
     BTreeNode *root_;
@@ -70,6 +72,21 @@ std::optional<V> BTree<K, V>::search(BTreeNode *node, const Key &k) {
 }
 
 template <typename K, typename V>
+void BTree<K, V>::erase(const Key &k) {
+    return erase(root_, k);
+}
+
+template <typename K, typename V>
+void BTree<K, V>::erase(BTreeNode *node, const Key &k) {
+    if (node == nullptr) {
+        //log warning
+        return;
+    }
+
+    
+}
+
+template <typename K, typename V>
 void BTree<K, V>::insert(const Key &k, const Value &v) {
     insert(root_, Pair(k ,v));
 }
@@ -80,7 +97,7 @@ void BTree<K, V>::insert(BTreeNode *node, const BTree::Pair &p) {
         //FIXME: panic?
         return;
     }
-    if (node->n_ == 2 * kMinmumDegree - 1) {
+    if (node->n_ == 2 * kMinDegree - 1) {
         auto *newNode = new BTreeNode(
                 false,
                 std::vector<Pair>(),
@@ -101,23 +118,20 @@ void BTree<K, V>::insertNotFull(BTreeNode *node, const BTree::Pair &p) {
     }
 
     const auto &key = p.first;
-    auto iter = std::find_if(node->data_.begin(), node->data_.end(), [&key](const Pair &curr){
-        return curr.first >= key;
-    });
+    auto iter = std::find_if(node->data_.begin(), node->data_.end(), 
+            [&key](const Pair &curr){ return curr.first >= key; });
 
-    if (node->isLeaf_) { // just insert
-        node->data_.insert(iter, p);
-        ++node->n_;
-    } else {
+    if (not node->isLeaf_) { // just insert
         u32 i = iter - node->data_.begin();
         auto *child = node->children_[i];
-        if (child->n_ == 2 * kMinmumDegree - 1) {
-            //FIXME: do something if splitChild fail.
-            // I don't like try/catch
+        if (child->n_ == 2 * kMinDegree - 1) {
             node->splitChild(i);
             if (node->data_[i].first < key) { ++i; }
         }
         insertNotFull(node->children_[i], p);
+    } else {
+        node->data_.insert(iter, p);
+        ++node->n_;
     }
 }
 
@@ -191,12 +205,12 @@ void BTreeNode<K, V>::splitChild(u32 i) {
     newRight->isLeaf_ = oldLeft->isLeaf_;
 
     auto iterEnd = oldLeft->data_.end();
-    newRight->data_.insert(newRight->data_.begin(), iterEnd - kMinmumDegree + 1, iterEnd);
-    newRight->n_ += kMinmumDegree - 1;
+    newRight->data_.insert(newRight->data_.begin(), iterEnd - kMinDegree + 1, iterEnd);
+    newRight->n_ += kMinDegree - 1;
 
     iterEnd = oldLeft->data_.end();
-    oldLeft->data_.erase(iterEnd - kMinmumDegree + 1, iterEnd); //TODO update n
-    oldLeft->n_ -= kMinmumDegree;
+    oldLeft->data_.erase(iterEnd - kMinDegree + 1, iterEnd);
+    oldLeft->n_ -= kMinDegree;
 
     data_.insert(data_.begin() + i, *(oldLeft->data_.end() - 1));
     children_.insert(children_.begin() + i + 1, newRight);
@@ -206,11 +220,11 @@ void BTreeNode<K, V>::splitChild(u32 i) {
     if (not oldLeft->isLeaf_) {
         newRight->children_.insert(
                 newRight->children_.begin(),
-                oldLeft->children_.end() - kMinmumDegree,
+                oldLeft->children_.end() - kMinDegree,
                 oldLeft->children_.end());
 
         oldLeft->children_.erase(
-                oldLeft->children_.end() - kMinmumDegree,
+                oldLeft->children_.end() - kMinDegree,
                 oldLeft->children_.end());
     }
 }
